@@ -1,0 +1,67 @@
+<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>How I built a true KVM with one keyboard and mouse across my Mac and PC</title>
+<meta name="description" content="Dell U3419W built-in KVM + DDC/CI hotkeys: one keyboard, one mouse, one monitor, Ctrl+Alt+1/2 to switch between a MacBook and an Alienware. One-line installers for macOS and Windows.">
+<style>
+:root{--bg:#f6f5f2;--paper:#fff;--ink:#1d2024;--muted:#5f6670;--accent:#c8552f;--line:#e2dfd8;--code:#f0eee9}
+@media(prefers-color-scheme:dark){:root{--bg:#151719;--paper:#1e2226;--ink:#e8e9eb;--muted:#a0a6ad;--accent:#f0865f;--line:#31363c;--code:#272c31}}
+body{margin:0;background:var(--bg);color:var(--ink);font:17px/1.6 -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif;padding:32px 16px}
+main{max-width:720px;margin:0 auto;background:var(--paper);border:1px solid var(--line);border-radius:12px;padding:32px 28px}
+h1{font-size:1.9rem;line-height:1.2;margin:0 0 6px;text-wrap:balance} h2{font-size:1.25rem;margin:2em 0 .4em}
+.by{color:var(--muted);font-size:.95rem;margin-bottom:1.5em} a{color:var(--accent)}
+pre{background:var(--code);padding:12px 14px;border-radius:8px;overflow-x:auto;font-size:.92rem} code{font-family:ui-monospace,SFMono-Regular,Menlo,monospace}
+p code{background:var(--code);padding:1px 5px;border-radius:4px}
+.install{border:1px solid var(--line);border-left:4px solid var(--accent);border-radius:8px;padding:14px 16px;margin:0 0 28px}
+.install h3{margin:0 0 8px;font-size:1rem} .install pre{margin:6px 0 10px} .install small{color:var(--muted)}
+li{margin:4px 0}
+</style></head><body><main>
+<div class="install"><h3>One-line install</h3>
+<b>macOS (Apple Silicon)</b> — Terminal:<pre><code>curl -fsSL https://raw.githubusercontent.com/jonchui/dell-kvm/main/install.sh | bash</code></pre>
+<b>Windows</b> — PowerShell as Administrator:<pre><code>irm https://raw.githubusercontent.com/jonchui/dell-kvm/main/install.ps1 | iex</code></pre>
+<small>Hotkeys on both: Ctrl+Alt+1 → PC · Ctrl+Alt+2 → Mac · Ctrl+Alt+0 → toggle. Source: <a href="install.sh">install.sh</a> · <a href="install.ps1">install.ps1</a></small></div>
+<h1>How I built a true KVM with one keyboard and one mouse across my Mac and my PC</h1>
+<p>I have a MacBook Pro, a new Alienware, and one 34" Dell ultrawide between them. What I wanted was stupidly simple: one keyboard, one mouse, one monitor, and a hotkey to jump between the two computers. What I got, at first, was a night of "why is nothing working." Here's what actually worked, in the order I wish I'd done it.</p>
+<h2>The setup</h2>
+<ul>
+<li>Monitor: Dell U3419W (34" ultrawide, built-in KVM)</li>
+<li>Mac: MacBook Pro M1 Pro, connected over one USB-C cable (video + power + USB)</li>
+<li>PC: Alienware Aurora, connected over HDMI</li>
+<li>Keyboard/mouse: Apple Magic Keyboard + Magic Trackpad</li>
+</ul>
+<h2>The one thing nobody tells you: your monitor is already a KVM</h2>
+<p>Most Dell UltraSharps have a KVM built in. The monitor has USB "upstream" ports (one per computer) and USB-A "downstream" ports (for your keyboard and mouse). The USB Selection menu in the OSD tells it: "when the picture is on input X, hand the keyboard to computer Y." Switch the picture and the keyboard follows. No software at all.</p>
+<p>Which means the whole problem reduces to two things:</p>
+<ol>
+<li>Wire each computer's USB into the monitor.</li>
+<li>Make a keyboard shortcut switch the monitor's input.</li>
+</ol>
+<h2>Step 1: the wiring (this is where I lost an hour)</h2>
+<p>The Mac was easy: one USB-C cable carries video, power, and USB.</p>
+<p>The PC needs <strong>two</strong> cables: HDMI for the picture, and a <strong>USB-A to USB-B</strong> cable from any USB port on the PC into the square USB-B port on the back of the monitor. That square "printer plug" is the cable everyone skips, and without it the monitor has no way to hand the PC your keyboard.</p>
+<p>My mistake: I used a USB-A to USB-A cable with a B adapter on the end. It looks like it should work. It doesn't. USB is a one-way tree: A ports are on hosts (computers), B ports are on devices (the monitor's hub). A-to-A means host-to-host, which the spec doesn't even define, so those cables are either charge-only or contain a chip pretending to be two devices. Either way the monitor's hub never announces itself to the PC. I could see from Windows that no hub ever appeared, and from the Mac that the keyboard never left. A plain $8 printer cable fixed it instantly.</p>
+<p>Then plug the Magic Keyboard into one of the monitor's USB-A ports with its Lightning cable. Wired, it acts as a plain USB keyboard for whichever computer the monitor points at. Unplug it and it's Bluetooth to the Mac again.</p>
+<h2>Step 2: the monitor menu (once)</h2>
+<p>Joystick → Menu → <strong>USB Selection</strong>. The U3419W lists it per video input:</p>
+<ul>
+<li>HDMI 1 → <strong>USB 2</strong> (the square port the PC's cable is in; there are two, labeled 1 and 2, so match them)</li>
+<li>USB-C is implicitly its own upstream, nothing to set</li>
+</ul>
+<p>Then Menu → Input Source → Auto Select → On.</p>
+<h2>Step 3: the hotkey, on both sides</h2>
+<p>The monitor speaks DDC/CI, a control channel over the video cable, so each computer can tell it "switch to input 17" (HDMI 1) or "switch to input 27" (USB-C). Each machine only needs to know how to <em>leave</em>, because once you switch, the keyboard is physically on the other computer.</p>
+<p><strong>On the Mac:</strong> <code>m1ddc</code> (Apple Silicon DDC tool) + Hammerspoon for the hotkey. Ctrl+Alt+1 → PC, Ctrl+Alt+2 → Mac, Ctrl+Alt+0 → toggle.</p>
+<p><strong>On Windows:</strong> NirSoft ControlMyMonitor + AutoHotkey, same three shortcuts. Ctrl and Alt on the Magic Keyboard are Ctrl and Option, so it's the same physical keys on both sides.</p>
+<p>I packaged both into one-line installers:</p>
+<p>macOS (Apple Silicon), in Terminal:</p>
+<pre><code>curl -fsSL https://raw.githubusercontent.com/jonchui/dell-kvm/main/install.sh | bash
+</code></pre>
+<p>Windows, in an admin PowerShell:</p>
+<pre><code>irm https://raw.githubusercontent.com/jonchui/dell-kvm/main/install.ps1 | iex
+</code></pre>
+<p>Different Dell or different ports? The input codes are variables at the top of each script (15 = DisplayPort, 17 = HDMI 1, 18 = HDMI 2, 27 = USB-C).</p>
+<h2>The detour I'd skip: software KVM</h2>
+<p>While waiting on the cable I set up Deskflow (the open-source Synergy fork), where the keyboard stays paired to the Mac and keystrokes get forwarded over Wi-Fi. It works, and it's the right answer if your monitor has no KVM. But it fights you in small ways: a non-elevated Windows client can't type into admin windows, two clients with the same name knock each other off, and every restart on the server side drops the session. The hardware path has none of that, and it works even when one machine is asleep.</p>
+<h2>What it feels like now</h2>
+<p>⌃⌥1: picture flips to the Alienware, keyboard and mouse come with it. ⌃⌥2: back to the Mac. That's it. Total hardware cost: one printer cable I should have had in a drawer.</p>
+<p>The whole thing was debugged with Claude reading the Mac's USB tree and the monitor's DDC state over my shoulder while I plugged cables in, which is the part I'd actually recommend: having something that can <em>see</em> which computer the keyboard is on turns a guessing game into a two-minute test.</p>
+<p class="by" style="margin-top:2.5em">— Jon Chui · <a href="https://jonchui.com">jonchui.com</a></p>
+</main></body></html>
