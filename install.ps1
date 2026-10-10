@@ -3,13 +3,13 @@
 #
 # What it does:
 #   1. Installs AutoHotkey v2 (winget) and NirSoft ControlMyMonitor (DDC/CI control).
-#   2. Drops a hotkey script in your Startup folder: Ctrl+Alt+1 -> PC input, Ctrl+Alt+2 -> Mac input, Ctrl+Alt+0 -> toggle.
+#   2. Drops a hotkey script in your Startup folder: Ctrl+Alt+<n> switches the monitor to input n from the INPUTS list.
 #
-# Change inputs (VCP 0x60 codes): 15 = DisplayPort, 17 = HDMI 1, 18 = HDMI 2, 27 = USB-C
-#   $env:PC_INPUT=15; $env:MAC_INPUT=27; irm https://raw.githubusercontent.com/jonchui/dell-kvm/main/install.ps1 | iex
+# INPUTS is a comma list of "<DDC code>:<label>" in hotkey order (Ctrl+Alt+1, +2, +3 ...).
+# DDC codes (VCP 0x60): 15 = DisplayPort, 17 = HDMI 1, 18 = HDMI 2, 27 = USB-C
+#   $env:INPUTS="17:Alienware,27:MacBook,18:Mac mini"; irm https://raw.githubusercontent.com/jonchui/dell-kvm/main/install.ps1 | iex
 $ErrorActionPreference = 'Continue'
-$PcInput  = if ($env:PC_INPUT)  { $env:PC_INPUT }  else { 17 }
-$MacInput = if ($env:MAC_INPUT) { $env:MAC_INPUT } else { 27 }
+$Inputs = if ($env:INPUTS) { $env:INPUTS } else { '17:PC,27:Mac' }
 
 function Say($m) { Write-Host "==> $m" -ForegroundColor Cyan }
 
@@ -19,32 +19,35 @@ winget install --id AutoHotkey.AutoHotkey -e --silent --accept-package-agreement
 Say "Installing ControlMyMonitor"
 $cmmDir = 'C:\Tools\ControlMyMonitor'
 New-Item -ItemType Directory -Force $cmmDir | Out-Null
-Invoke-WebRequest 'https://www.nirsoft.net/utils/controlmymonitor.zip' -OutFile "$env:TEMP\cmm.zip" -UserAgent 'Mozilla/5.0'
-Expand-Archive "$env:TEMP\cmm.zip" $cmmDir -Force
+if (-not (Test-Path "$cmmDir\ControlMyMonitor.exe")) {
+  Invoke-WebRequest 'https://www.nirsoft.net/utils/controlmymonitor.zip' -OutFile "$env:TEMP\cmm.zip" -UserAgent 'Mozilla/5.0'
+  Expand-Archive "$env:TEMP\cmm.zip" $cmmDir -Force
+}
 if (-not (Test-Path "$cmmDir\ControlMyMonitor.exe")) { throw "ControlMyMonitor.exe not found after extract" }
 
 Say "Writing startup hotkey script"
-$ahk = @"
-#Requires AutoHotkey v2.0
-; DELL-KVM: switch monitor input over DDC/CI. Codes: $PcInput = PC, $MacInput = Mac
-CMM := "$cmmDir\ControlMyMonitor.exe"
-SetInput(code) {
-    global CMM
-    Run(Format('"{1}" /SetValue Primary 60 {2}', CMM, code), , "Hide")
+$lines = @(
+  '#Requires AutoHotkey v2.0',
+  '; DELL-KVM: switch monitor input over DDC/CI (VCP 0x60).',
+  "CMM := `"$cmmDir\ControlMyMonitor.exe`"",
+  'SetInput(code) {',
+  '    global CMM',
+  "    Run(Format('`"{1}`" /SetValue Primary 60 {2}', CMM, code), , `"Hide`")",
+  '}'
+)
+$n = 0; $summary = @()
+foreach ($item in $Inputs.Split(',')) {
+  $n++; $code, $label = $item.Trim().Split(':', 2)
+  $lines += "^!${n}::SetInput($code)   ; $label"
+  $summary += "Ctrl+Alt+$n -> $label (input $code)"
 }
-^!1::SetInput($PcInput)
-^!2::SetInput($MacInput)
-^!0::SetInput($MacInput)   ; from the PC, "toggle" means go to the Mac
-"@
 $startup = [Environment]::GetFolderPath('Startup')
 $file = Join-Path $startup 'Dell-KVM.ahk'
-Set-Content -Encoding UTF8 -Path $file -Value $ahk
-Get-Process -Name AutoHotkey* -ErrorAction SilentlyContinue | Where-Object { $_.MainWindowTitle -like '*Dell-KVM*' } | Stop-Process -Force -ErrorAction SilentlyContinue
+Set-Content -Encoding UTF8 -Path $file -Value ($lines -join "`r`n")
+Get-Process -Name AutoHotkey* -ErrorAction SilentlyContinue | Stop-Process -Force -ErrorAction SilentlyContinue
 Start-Process $file
 
 Write-Host ""
-Write-Host "Done."
-Write-Host "  Ctrl+Alt+1  monitor -> PC  (input $PcInput)"
-Write-Host "  Ctrl+Alt+2  monitor -> Mac (input $MacInput)"
-Write-Host "  Ctrl+Alt+0  toggle"
+Write-Host "Done. Hotkeys:"
+$summary | ForEach-Object { Write-Host "  $_" }
 Write-Host "If the Dell isn't your primary display, edit $file and replace 'Primary' with the monitor ID shown in ControlMyMonitor."
